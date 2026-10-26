@@ -16,16 +16,16 @@ To make the most of this interactive workshop, participants should ensure they h
 - Podman installed (recommended, as we will be using this) or Docker Desktop
   - Podman installation instructions: https://podman.io/docs/installation 
   - Pull container images BEFORE the day of the workshop:
-    - Build Script: [workshop/setup.sh](workshop/setup.sh) which automates install/setup (Manual Process below.)
-    - Manual method: pre-pull the following Podman images:
-      - podman pull docker.io/opensearchproject/opensearch:3.5.0
-      - podman pull docker.io/opensearchproject/opensearch-dashboards:3.5.0
-      - podman pull pgvector/pgvector:pg17
-      - Build mem0 and mem0-dashboard using these instructions: https://github.com/mem0ai/mem0/blob/main/server/README.md
+    - podman pull docker.io/opensearchproject/opensearch:3.5.0
+    - podman pull docker.io/opensearchproject/opensearch-dashboards:3.5.0
+    - podman pull pgvector/pgvector:pg17
+    - Build mem0 and mem0-dashboard using these instructions: https://github.com/mem0ai/mem0/blob/main/server/README.md
 - Access to an OpenAI-compatible platform (REST API) with an API KEY
   - An API Key will NOT be provided
   - Compatible platforms: OpenAI, Nebius TokenFactory, Groq
   - Untested but should work: Together AI, Fireworks AI, or OpenRouter
+- Create a FREE account on Tavily, an AI Search Engine (Using this for demo purposes)
+  - Website: [https://www.tavily.com](https://www.tavily.com)
 
 ## Workshop Materials
 
