@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Check the workshop stack without creating, changing, or deleting memories.
 
-Run from the workshop project root after setup.sh has started the containers.
-Shell variables take precedence over workshop.env, then .env, then defaults.
-OpenAI checks make small billable requests; Tavily uses GET /usage.
+Place beside setup.sh and run after setup.sh has started the containers.
+Exported shell variables take precedence over optional workshop.env, then .env,
+then the host-side defaults from setup.sh. Env files are read beside this script;
+the container-only mem0/server/.env is deliberately not loaded.
+OPENAI_BASE_URL defaults to https://api.openai.com/v1 and can point to an
+OpenAI-compatible API. OPENAI_MODEL and MEM0_DEFAULT_EMBEDDER_MODEL select the
+chat and embedding models; MEM0_DEFAULT_LLM_MODEL checks Mem0's configured model.
+OpenAI-compatible API checks make small billable requests; Tavily uses GET /usage.
 Mem0 may record ordinary API access logs for the read-only requests.
 """
 from __future__ import annotations
@@ -17,7 +22,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
 HTTP_TIMEOUT = 10.0
@@ -36,6 +41,59 @@ class CheckFailure(RuntimeError):
     """An actionable diagnostic containing no credentials or response bodies."""
 
 
+class ConfigurationError(CheckFailure):
+    """A named environment setting is invalid, rather than a programming error."""
+
+
+def env_value(name: str, default: str) -> str:
+    """Use setup defaults for missing or blank non-secret settings."""
+    return os.getenv(name, "").strip() or default
+
+
+def endpoint(name: str, value: str) -> str:
+    """Validate an HTTP(S) base URL without including its value in errors."""
+    try:
+        parsed = urlsplit(value)
+        invalid = (
+            parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or "?" in value or "#" in value or "\\" in value
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
+            or (parsed.port is not None and not 1 <= parsed.port <= 65535)
+            or parsed.netloc.endswith(":")
+        )
+    except ValueError:
+        invalid = True
+    if invalid:
+        raise ConfigurationError(
+            f"{name} must be an HTTP(S) URL with a valid hostname and port, "
+            "without embedded credentials, whitespace, query parameters, or fragments."
+        ) from None
+    return value.rstrip("/")
+
+
+def host_value(name: str, default: str) -> str:
+    """Accept a bare hostname or IP address, not a URL or host:port pair."""
+    value = env_value(name, default)
+    try:
+        authority = f"[{value}]" if ":" in value and not value.startswith("[") else value
+        parsed = urlsplit("//" + authority)
+        invalid = (
+            not parsed.hostname or parsed.port is not None
+            or parsed.username is not None or parsed.password is not None
+            or any(char in value for char in "/\\?#")
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
+            or authority.endswith(":")
+        )
+    except ValueError:
+        invalid = True
+    if invalid:
+        raise ConfigurationError(
+            f"{name} must be a hostname or IP address without a scheme, port, or path."
+        ) from None
+    return parsed.hostname
+
+
 @dataclass(frozen=True)
 class Result:
     status: str
@@ -45,9 +103,9 @@ class Result:
 @dataclass(frozen=True)
 class Settings:
     opensearch_url: str
-    opensearch_index: str
     mem0_url: str
     mem0_api_key: str
+    mem0_openai_model: str
     postgres_host: str
     postgres_port: int
     postgres_user: str
@@ -55,67 +113,60 @@ class Settings:
     postgres_db: str
     app_db: str
     openai_api_key: str
+    openai_base_url: str
     openai_model: str
     openai_embedding_model: str
     tavily_api_key: str
-    # llm_url: str
-    # llm_api_key: str
-    # llm_model: str
 
     @classmethod
     def from_env(cls) -> "Settings":
         def port(name: str, default: int) -> int:
-            value = int(os.getenv(name, str(default)))
+            try:
+                value = int(env_value(name, str(default)))
+            except ValueError:
+                raise ConfigurationError(
+                    f"{name} must be an integer between 1 and 65535."
+                ) from None
             if not 1 <= value <= 65535:
-                raise ValueError(f"{name} must be between 1 and 65535.")
+                raise ConfigurationError(f"{name} must be between 1 and 65535.")
             return value
 
-        settings = cls(
-            opensearch_url=(
-                f"http://{os.getenv('OPENSEARCH_HOST', '127.0.0.1')}:"
-                f"{port('OPENSEARCH_PORT', 9200)}"
+        search_host = host_value("OPENSEARCH_HOST", "127.0.0.1")
+        search_authority = f"[{search_host}]" if ":" in search_host else search_host
+        return cls(
+            opensearch_url=endpoint(
+                "OPENSEARCH_HOST / OPENSEARCH_PORT",
+                f"http://{search_authority}:{port('OPENSEARCH_PORT', 9200)}",
             ),
-            opensearch_index=os.getenv("OPENSEARCH_INDEX", "bbc-vector-chunks"),
-            mem0_url=os.getenv("MEM0_BASE_URL", "http://127.0.0.1:8888").rstrip("/"),
-            mem0_api_key=os.getenv("MEM0_API_KEY", ""),
-            mem0_openai_model=os.getenv("MEM0_DEFAULT_LLM_MODEL", "gpt-5.4-mini"),
-            postgres_host=os.getenv("POSTGRES_HOST", "127.0.0.1"),
+            mem0_url=endpoint(
+                "MEM0_BASE_URL", env_value("MEM0_BASE_URL", "http://127.0.0.1:8888")
+            ),
+            mem0_api_key=os.getenv("MEM0_API_KEY", "").strip(),
+            mem0_openai_model=env_value("MEM0_DEFAULT_LLM_MODEL", "gpt-5.4-mini"),
+            postgres_host=host_value("POSTGRES_HOST", "127.0.0.1"),
             postgres_port=port("POSTGRES_PORT", 8432),
-            postgres_user=os.getenv("POSTGRES_USER", "postgres"),
+            postgres_user=env_value("POSTGRES_USER", "postgres"),
             postgres_password=os.getenv("POSTGRES_PASSWORD", "postgrespostgres"),
-            postgres_db=os.getenv("POSTGRES_DB", "postgres"),
-            app_db=os.getenv("APP_DB_NAME", "mem0_app"),
-            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-            openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
-            openai_embedding_model=os.getenv(
+            postgres_db=env_value("POSTGRES_DB", "postgres"),
+            app_db=env_value("APP_DB_NAME", "mem0_app"),
+            openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            openai_base_url=endpoint("OPENAI_BASE_URL", env_value("OPENAI_BASE_URL", OPENAI_URL)),
+            openai_model=env_value("OPENAI_MODEL", "gpt-5.4-mini"),
+            openai_embedding_model=env_value(
                 "MEM0_DEFAULT_EMBEDDER_MODEL", "text-embedding-3-small"
             ),
-            tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
-            # llm_url=os.getenv("LLM_SERVER_URL", "http://127.0.0.1:8001/v1").rstrip("/"),
-            # llm_api_key=os.getenv("LLM_SERVER_API_KEY", "not-needed") or "not-needed",
-            # llm_model=os.getenv("LLM_SERVER_MODEL", "local-llm"),
+            tavily_api_key=os.getenv("TAVILY_API_KEY", "").strip(),
         )
-        # for value in (settings.opensearch_url, settings.mem0_url, settings.llm_url):
-        #     parsed = urlsplit(value)
-        #     if (
-        #         parsed.scheme not in {"http", "https"} or not parsed.hostname
-        #         or parsed.username or parsed.password or parsed.query or parsed.fragment
-        #     ):
-        #         raise ValueError("Use HTTP(S) endpoint URLs without embedded credentials.")
-        # if not settings.llm_url.endswith("/v1"):
-        #     raise ValueError("LLM_SERVER_URL must end in /v1 for this workshop.")
-        # if urlsplit(settings.llm_url).hostname == "api.openai.com":
-        #     raise ValueError(
-        #         "LLM_SERVER_URL must target the workshop's local inference service, "
-        #         "not the hosted OpenAI API."
-        #     )
-        return settings
 
 
 def require_key(name: str, value: str) -> None:
     lowered = value.strip().lower()
     if not lowered or lowered in {"replace-me", "not-needed", "changeme"} or "your-key" in lowered:
-        raise CheckFailure(f"Set {name} in the shell or workshop.env; do not print the key.")
+        raise CheckFailure(
+            f"{name} is missing or contains a placeholder. Export it in the shell "
+            "that launches Python, or set it in workshop.env or .env beside this script. "
+            "A .bash_profile assignment must be exported and loaded into that shell."
+        )
 
 
 def command(args: list[str]) -> str:
@@ -143,13 +194,23 @@ def get_json(url: str, *, headers: dict | None = None, params: dict | None = Non
         url, headers=headers, params=params, timeout=HTTP_TIMEOUT, follow_redirects=False
     )
     if response.status_code != 200:
+        advice = {
+            401: "Authentication rejected; verify the API key for this service.",
+            403: "Access denied; verify API permissions for this service.",
+            404: "Endpoint not found; verify the service base URL and API path.",
+            429: "Rate or quota limit reached; check API usage and limits.",
+        }
         raise CheckFailure(
-            f"HTTP {response.status_code}; check the endpoint, authentication, and service logs."
+            f"HTTP {response.status_code}; "
+            + advice.get(response.status_code, "Check the endpoint and service logs.")
         )
     try:
-        return response.json()
+        data = response.json()
     except ValueError:
         raise CheckFailure("Expected a JSON response, not an HTML page or proxy response.") from None
+    if not isinstance(data, dict):
+        raise CheckFailure("Expected a JSON object; verify the service base URL and API path.")
+    return data
 
 
 def check_tools(_: Settings) -> Result:
@@ -278,23 +339,53 @@ def cloud_client(s: Settings):
     from openai import OpenAI
 
     require_key("OPENAI_API_KEY", s.openai_api_key)
-    # Explicit URL prevents OPENAI_BASE_URL from silently validating a local server instead.
     return OpenAI(
-        api_key=s.openai_api_key, base_url=OPENAI_URL, timeout=30.0, max_retries=0
+        api_key=s.openai_api_key, base_url=s.openai_base_url, timeout=30.0, max_retries=0
     )
 
 
-def check_openai_chat(s: Settings) -> Result:
-    with cloud_client(s) as client:
-        response = client.chat.completions.create(
-            model=s.openai_model,
-            messages=[{"role": "user", "content": "Reply OK."}],
-            max_completion_tokens=16,
+def unsupported_completion_limit(exc: Exception) -> bool:
+    """Allow a bounded compatibility retry only for an unsupported token field."""
+    if getattr(exc, "status_code", None) not in {400, 422}:
+        return False
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error", body)
+    if not isinstance(error, dict):
+        return False
+    message = str(error.get("message", "")).lower()
+    field_named = (
+        error.get("param") == "max_completion_tokens"
+        or "max_completion_tokens" in message
+    )
+    unsupported = error.get("code") in {"unsupported_parameter", "unknown_parameter"} or any(
+        term in message for term in (
+            "not supported", "unsupported", "unknown parameter", "unrecognized",
+            "unexpected keyword", "not permitted", "not allowed",
         )
+    )
+    return field_named and unsupported
+
+
+def check_openai_chat(s: Settings) -> Result:
+    from openai import APIStatusError
+
+    with cloud_client(s) as client:
+        request = {
+            "model": s.openai_model,
+            "messages": [{"role": "user", "content": "Reply OK."}],
+        }
+        try:
+            response = client.chat.completions.create(**request, max_completion_tokens=16)
+        except APIStatusError as exc:
+            if not unsupported_completion_limit(exc):
+                raise
+            response = client.chat.completions.create(**request, max_tokens=16)
     if not response.id or not response.choices:
-        raise CheckFailure("OpenAI returned no completion identifier or choices.")
+        raise CheckFailure("The API returned no completion identifier or choices.")
     return Result(
-        "PASS", f"Hosted OpenAI accepted a chat request for {s.openai_model}. "
+        "PASS", f"Configured OpenAI-compatible API accepted a chat request for {s.openai_model}. "
         "A short token budget may produce empty text; this checks access, not answer quality."
     )
 
@@ -305,8 +396,8 @@ def check_openai_embeddings(s: Settings) -> Result:
             model=s.openai_embedding_model, input="Workshop connectivity check."
         )
     if not response.data or not response.data[0].embedding:
-        raise CheckFailure("OpenAI returned no embedding.")
-    return Result("PASS", f"Hosted embedding request succeeded for {s.openai_embedding_model}.")
+        raise CheckFailure("The API returned no embedding.")
+    return Result("PASS", f"API embedding request succeeded for {s.openai_embedding_model}.")
 
 
 def check_tavily(s: Settings) -> Result:
@@ -325,61 +416,17 @@ def check_tavily(s: Settings) -> Result:
     return Result("PASS", "Tavily authenticated GET /usage; no web search or MCP request was made.")
 
 
-# def check_local_llm(s: Settings) -> Result:
-#     from openai import OpenAI
-
-#     health = get_json(s.llm_url.removesuffix("/v1") + "/health")
-#     if health.get("status") != "ok":
-#         raise CheckFailure("The local LLM health endpoint did not report status=ok.")
-#     if health.get("model") != s.llm_model:
-#         raise CheckFailure("LLM_SERVER_MODEL does not match the running local service.")
-#     with OpenAI(
-#         base_url=s.llm_url, api_key=s.llm_api_key, timeout=120.0, max_retries=0
-#     ) as client:
-#         response = client.chat.completions.create(
-#             model=s.llm_model,
-#             messages=[{"role": "user", "content": "Reply with the word ready."}],
-#             max_tokens=16, temperature=0,
-#         )
-#     if not response.choices or not (response.choices[0].message.content or "").strip():
-#         raise CheckFailure("Local inference returned no text; inspect model and service logs.")
-#     return Result("PASS", "Local service health and SDK chat inference verified independently of OpenAI.")
-
-
-# def check_index(s: Settings) -> Result:
-#     import httpx
-
-#     base = s.opensearch_url + "/" + quote(s.opensearch_index, safe="")
-#     response = httpx.get(base + "/_mapping", timeout=HTTP_TIMEOUT, follow_redirects=False)
-#     if response.status_code == 404:
-#         return Result("WARN", "RAG index does not exist yet. Expected before make ingest.")
-#     if response.status_code != 200:
-#         raise CheckFailure("Cannot inspect RAG index mapping; inspect OpenSearch.")
-#     mapping = response.json()
-#     properties = mapping.get(s.opensearch_index, {}).get("mappings", {}).get("properties", {})
-#     if properties.get("embedding", {}).get("type") != "knn_vector":
-#         raise CheckFailure("Existing RAG index does not have an embedding knn_vector field.")
-#     settings = get_json(base + "/_settings")
-#     knn = settings.get(s.opensearch_index, {}).get("settings", {}).get("index", {}).get("knn")
-#     if str(knn).lower() != "true":
-#         raise CheckFailure("Existing RAG index does not have index.knn enabled.")
-#     count = get_json(base + "/_count").get("count")
-#     if not isinstance(count, int):
-#         raise CheckFailure("OpenSearch returned an invalid document count.")
-#     if count == 0:
-#         return Result("WARN", "RAG index is empty. Run make ingest before Exercise 1 queries.")
-#     return Result("PASS", f"RAG index contains {count} chunks; vector mapping enabled.")
-
-
 def safe_error(exc: Exception) -> str:
     """Do not expose keys, response bodies, request headers, or arbitrary exception text."""
     if isinstance(exc, CheckFailure):
         return str(exc)
     status = getattr(exc, "status_code", None)
     advice = {
+        400: "Request rejected; verify the configured model and its supported API parameters.",
         401: "Authentication rejected; verify the relevant key without printing it.",
         403: "Access denied; verify project permissions and model access.",
         404: "Resource or model not found; verify the configured endpoint and model.",
+        422: "Request validation failed; verify the provider's supported API parameters.",
         429: "Rate or quota limit reached; check API usage, billing, and rate limits.",
     }
     if status in advice:
@@ -425,22 +472,34 @@ def main() -> int:
             missing.append(name)
     if missing:
         print("[FAIL] Missing validation dependencies: " + ", ".join(missing))
-        print("Run: python -m pip install -r requirements-validation.txt")
+        print("Run: python -m pip install -r requirements.txt")
         return 2
 
     from dotenv import load_dotenv
 
-    load_dotenv(ROOT / "workshop.env", override=False)
-    load_dotenv(ROOT / ".env", override=False)
+    try:
+        load_dotenv(ROOT / "workshop.env", override=False)
+        load_dotenv(ROOT / ".env", override=False)
+    except (OSError, UnicodeError):
+        print("[FAIL] Cannot read workshop.env or .env beside this script; check access and UTF-8 encoding.")
+        return 2
     try:
         settings = Settings.from_env()
-    except (ValueError, TypeError):
-        print("[FAIL] Invalid endpoint or port configuration; review workshop.env and .env.")
+    except ConfigurationError as exc:
+        print(f"[FAIL] Configuration: {exc}")
+        return 2
+    except Exception as exc:
+        print(
+            f"[FAIL] Validator initialization failed ({type(exc).__name__}); "
+            "inspect the Settings implementation. Service and API-key checks have not run."
+        )
         return 2
 
     print("Workshop validation: no memory writes, resets, or index changes.")
-    print("OpenAI chat and embedding probes make small billable requests.")
-    print("Local services and cloud providers are checked separately.\n")
+    print("Configuration: exported environment > workshop.env > .env > setup defaults.")
+    print("Env files are optional and read beside this script.")
+    print("OpenAI-compatible chat and embedding probes make small billable requests.")
+    print("Podman services and API providers are checked separately.\n")
     checks = (
         ("Host tools and Podman", check_tools),
         ("Workshop containers", check_containers),
@@ -448,11 +507,9 @@ def main() -> int:
         ("PostgreSQL and pgvector", check_pgvector),
         ("Mem0 application database", check_app_database),
         ("Mem0 API and vector-store read", check_mem0),
-        ("OpenAI API key and model access", check_openai_chat),
-        ("OpenAI embedding access", check_openai_embeddings),
+        ("OpenAI-compatible API key and model access", check_openai_chat),
+        ("OpenAI-compatible embedding access", check_openai_embeddings),
         ("Tavily API key", check_tavily),
-        # ("Local inference service", check_local_llm),
-        # ("RAG index readiness", check_index),
     )
     results = [run_check(label, lambda fn=fn: fn(settings)) for label, fn in checks]
     return summarize(results)
