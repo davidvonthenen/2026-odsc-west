@@ -15,7 +15,7 @@ The lab uses **Python**, **OpenSearch** for historical document retrieval, AI se
 
 ## Workshop Prerequisites
 
-**IMPORTANT:** There is a super easy guide with a script to install and setup these various components ahead of this workshop. Please see [workshop/README.md](workshop/README.md).
+**IMPORTANT:** There is a super easy guide with a script to install and setup these various components ahead of this workshop. Please see [workshop/0_setup/README.md](workshop/0_setup/README.md).
 
 To make the most of this interactive workshop, participants should ensure they have:
 
@@ -52,6 +52,6 @@ Follow the exercise READMEs in order. Each includes the commands to run, what to
 
 5. **[Exercise 4: Long-Running Agentic RAG with Explicit Memory Lifecycle Policies](workshop/4_agentic_memory_lifecycle/README.md)**: Extend the same News Agent to inspect **Capture, Consolidate, Retrieve, Update, and Forget** events. Trigger message-count-based compaction, inspect versioned working-history snapshots, resume after a restart, and test time-based exclusion of expired memories. In this implementation, expiration removes records from ordinary topic recall; it does **not** physically delete the raw conversation or archived memory records.
 
-The agentic exercises keep memory scoped to the **News Agent's domain**. Throughout Exercises 2–4, **mem0 remains the persistent memory service**; Exercise 4 adds lifecycle policies in Python rather than replacing it with another memory backend.
+The agentic exercises keep memory scoped to the **News Agent's domain**. Throughout Exercises 2-4, **mem0 remains the persistent memory service**; Exercise 4 adds lifecycle policies.
 
 For a printable prerequisite overview, see [Cognitive Memory Architectures: Prerequisite Software](DavidvonThenen_Cognitive_Memory_Architectures_Prerequisite_Software.pdf).

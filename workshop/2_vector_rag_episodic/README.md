@@ -32,7 +32,7 @@ Open **two terminals** in that directory and activate the prepared Python enviro
 
 Leave the NER server running in Terminal A throughout this exercise. Run client requests one at a time in Terminal B and wait for each response before continuing. Each `python query.py` invocation answers one question and exits.
 
-Keep the same configured `MEMORY_USER_ID` and `MEMORY_SESSION_ID` throughout Steps 1 **TODO: REPLACE_THIS** 5. Step 6 explicitly starts a new session for its memory experiment. The packaged defaults are `user-123` and `123456`; use the identities assigned during your setup if they differ. Existing history under those identities will be loaded, so your initial message counts may differ from another attendee's.
+Keep the same configured `MEMORY_USER_ID` and `MEMORY_SESSION_ID` throughout Steps 1-5. Step 6 explicitly starts a new session for its memory experiment. The packaged defaults are `user-123` and `123456`; use the identities assigned during your setup if they differ. Existing history under those identities will be loaded, so your initial message counts may differ from another attendee's.
 
 ## The application you are using
 
