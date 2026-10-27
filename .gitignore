@@ -3,6 +3,7 @@ __pycache__/
 *.py[codz]
 *$py.class
 .DS_Store
+exported_containers
 
 # C extensions
 *.so
