@@ -117,7 +117,7 @@ git clone https://github.com/davidvonthenen/2026-odsc-west.git
 Then proceed to the `scripts` directory in the repository you just downloaded:
 
 ```bash
-cd 2026-odsc-west/workshop/scripts/0_setup
+cd 2026-odsc-west/workshop/0_setup
 ```
 
 ## 3. Prepare Python and API keys
