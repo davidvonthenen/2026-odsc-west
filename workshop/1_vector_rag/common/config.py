@@ -20,7 +20,9 @@ class Settings:
     opensearch_index: str = "bbc-vector-chunks"
 
     # Embeddings
-    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
+    # use sentence-transformers/all-MiniLM-L6-v2 for systems without GPU acceleration
+    # use Qwen/Qwen3-Embedding-0.6B for more production-like results
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # which setting
     external_ai: bool = True
