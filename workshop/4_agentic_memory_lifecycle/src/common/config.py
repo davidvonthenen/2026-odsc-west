@@ -20,8 +20,10 @@ class Settings:
     opensearch_ssl: bool = False
     opensearch_index: str = "techcomp-vector-chunks"
 
-    # Embeddings and retrieval
-    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
+    # Embeddings
+    # use sentence-transformers/all-MiniLM-L6-v2 for systems without GPU acceleration
+    # use Qwen/Qwen3-Embedding-0.6B for more production-like results
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     rag_top_k: int = 5
     rag_num_candidates: int = 5
     rag_max_chunks_per_source: int = 2

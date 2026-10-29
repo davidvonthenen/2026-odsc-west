@@ -43,8 +43,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--index-name", default=None, help="Target OpenSearch index")
-    parser.add_argument("--chunk-size", type=int, default=2048)
-    parser.add_argument("--chunk-overlap", type=int, default=256)
+    parser.add_argument("--chunk-size", type=int, default=512)
+    parser.add_argument("--chunk-overlap", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument(
         "--recreate-index",

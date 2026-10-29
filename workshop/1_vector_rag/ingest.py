@@ -24,13 +24,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=2048,
+        default=512,
         help="Maximum characters per vector chunk",
     )
     parser.add_argument(
         "--chunk-overlap",
         type=int,
-        default=256,
+        default=128,
         help="Character overlap between consecutive vector chunks",
     )
     parser.add_argument(
